@@ -8,4 +8,9 @@ simulation
 *.rpt
 *.bak
 *~
-dtb.sof
+*.sof
+
+*.done
+*.smsg
+*.jdi
+*.pin
