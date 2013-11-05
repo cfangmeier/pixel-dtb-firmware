@@ -1,0 +1,8 @@
+#Eclipse-NiosII Compiled Files
+*.elf
+*.objdump
+*.map
+
+#Output Directories
+dtb_bsp/obj/
+dtb_expert/obj/

@@ -776,16 +776,78 @@ void CTestboard::Pg_Loop(unsigned short period)
 	IOWR_32DIRECT(PATTERNGEN_CTRL_BASE, 0, 0x84);
 }
 
-uint16_t CTestboard::GetUser1Version(){
-	return 0;
+// == TBM functions =====================================================
+
+const unsigned char CTestboard::MODCONF[16]
+= { 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3 };
+
+// selects if you want to use the TBM
+// Note: MOD_present is used for automatic address assignment. Works with standard BPix modules only
+void CTestboard::tbm_Enable(bool on)
+{
+	TBM_present = on;
+	if (!TBM_present) MOD_present = 0;
+}
+
+
+void CTestboard::tbm_Addr(uint8_t hub, uint8_t port)
+{
+	MOD_present = false;
+	HUB_address = ((hub & 0x1f)<<3) + (port & 0x07);
+}
+
+
+void CTestboard::mod_Addr(uint8_t hub)
+{
+	MOD_present = true;
+	HUB_address = ((hub & 0x1f)<<3);
+}
+
+
+void CTestboard::tbm_Set(uint8_t reg, uint8_t value)
+{
+	if (!TBM_present) return;
+
+	while (GetI2cHs(0) & 1);
+	SetI2cHs(3, (HUB_address & (0x1f<<3)) + 4); // 4 is the TBM address
+	SetI2cHs(3, reg);
+	SetI2cHs(4, value);
+	SetI2cHs(0, 3);
+}
+
+bool CTestboard::tbm_GetRaw(uint8_t reg, uint32_t &value)
+{
+	if (!TBM_present) { value = -1; return false; }
+    
+	while (GetI2cHs(0) & 1);
+	SetI2cHs(3, (HUB_address & (0x1f<<3)) + 4);
+	SetI2cHs(3, reg | 1);
+	SetI2cHs(4, 0x7ff);
+	SetI2cHs(0, 3);
+
+	short count = 0;
+	cDelay(5);
+	while ((GetI2cHs(0) & 1) && count<500) count++;
+	value = GetI2cHs(1);
+
+	return value >= 0;
+}
+
+bool CTestboard::tbm_Get(uint8_t reg, uint8_t &value)
+{
+	long x;
+	reg |= 1;
+	if (!tbm_GetRaw(reg, x)) return false;
+	long y = (((HUB_address & (0x1f<<3)) + 4) << 8) + reg;
+	if (((x>>8) & 0xffff) != y) return false;
+	value = (unsigned char)(x & 0xff);
+	return true;
+>>>>>>> devel-quartus-test
 }
 
 // === ROC/Module Communication =========================================
 
 // --- ROC functions ----------------------------------------------------
-
-const unsigned char CTestboard::MODCONF[16]
-= { 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3 };
 
 
 // -- set the i2c address for the following commands
