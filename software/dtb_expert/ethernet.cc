@@ -7,13 +7,13 @@
 #include <altera_avalon_sgdma_descriptor.h>
 #include <altera_avalon_sgdma_regs.h>
 
-#include <sys/alt_stdio.h>
 #include <sys/alt_irq.h>
 #include <sys/alt_cache.h>
-#include <stdio.h>
 
-#include "ethernet.h"
-#include "dtb_config.h"
+#include "pixel_dtb.h"
+
+
+// === ETHERNET test ========================================================
 
 template <class T>
 inline volatile T* Uncache(T *x) { return (T*)(((unsigned long)x) | 0x80000000); }
@@ -22,12 +22,16 @@ const unsigned int FRAME_SIZE = 1024;
 const unsigned int BUFFER_SIZE = 5*FRAME_SIZE;
 
 // Create a transmit frame
-unsigned char tx_frame[FRAME_SIZE] = {
+unsigned char tx_frame[1024] =
+{
 	0x00,0x00, 						// for 32-bit alignment
 	0xFF,0xFF,0xFF,0xFF,0xFF,0xFF, 	// destination address (broadcast)
 	0x01,0x60,0x6E,0x11,0x02,0x0F, 	// source address //updated later
 	0x08,0x01  						// length or type of the payload data
 };
+
+#define DATA_OFFSET 16
+
 
 // Create a receive frame
 unsigned char rx_frame[FRAME_SIZE] = { 0 };
@@ -212,19 +216,11 @@ void rx_ethernet_isr (void *context)
 int eth_init(bool& initiated){
 	// Open the sgdma transmit device
 	sgdma_tx_dev = alt_avalon_sgdma_open ("/dev/sgdma_tx");
-	if (sgdma_tx_dev == NULL)
-	{
-		printf ("Error: could not open scatter-gather dma transmit device\n");
-		return -1;
-	} else printf ("Opened scatter-gather dma transmit device\n");
+	if (sgdma_tx_dev == NULL) return false;
 
 	// Open the sgdma receive device
 	sgdma_rx_dev = alt_avalon_sgdma_open ("/dev/sgdma_rx");
-	if (sgdma_rx_dev == NULL)
-	{
-		printf ("Error: could not open scatter-gather dma receive device\n");
-		return -1;
-	} else printf ("Opened scatter-gather dma receive device\n");
+	if (sgdma_rx_dev == NULL) return false;
 
 	// Set interrupts for the sgdma receive device
 	alt_avalon_sgdma_register_callback( sgdma_rx_dev, (alt_avalon_sgdma_callback) rx_ethernet_isr, 0x00000014, NULL );
@@ -320,18 +316,29 @@ void eth_flush(){
 	tx_frame[19] = (char)(txPayloadSize >> 8);
 	tx_frame[20] = (char)txPayloadSize;
 
-	alt_dcache_flush(tx_frame, 1024);
+uint32_t CTestboard::Ethernet_RecvPackets()
+{
+	return rx_frame_counter;
+}
+
+
+void rx_ethernet_isr (void *context)
+{
+	rx_frame_counter++;
+
+	// Wait until receive descriptor transfer is complete
+	while (alt_avalon_sgdma_check_descriptor_status(&rx_descriptor) != 0);
+	alt_dcache_flush(rx_frame, 1024);
 
 	// Create transmit sgdma descriptor
 	alt_avalon_sgdma_construct_mem_to_stream_desc( &tx_descriptor, &tx_descriptor_end, (alt_u32*)tx_frame,
 			txPayloadSize+21 , 0, 1, 1, 0 );
 
-	// Set up non-blocking transfer of sgdma transmit descriptor
-	alt_avalon_sgdma_do_async_transfer( sgdma_tx_dev, &tx_descriptor );
+	// Create new receive sgdma descriptor
+	alt_avalon_sgdma_construct_stream_to_mem_desc( &rx_descriptor, &rx_descriptor_end, (alt_u32*)rx_frame, 0, 0 );
 
-	// Wait until transmit descriptor transfer is complete
-	while (alt_avalon_sgdma_check_descriptor_status(&tx_descriptor) != 0);
-	txPayloadSize = 0;
+	// Set up non-blocking transfer of sgdma receive descriptor
+	alt_avalon_sgdma_do_async_transfer( sgdma_rx_dev, &rx_descriptor );
 }
 
 bool eth_write(const void* data, unsigned int size){
@@ -379,4 +386,6 @@ bool CEthernet::IsOpen(){
 	if(!initiated) eth_init(initiated);
 	return claimed;
 }
+
+
 
